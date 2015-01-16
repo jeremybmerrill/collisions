@@ -23,9 +23,34 @@ tables/collisions: collisions.csv | tables
 	psql -d ${DBNAME} -c "UPDATE collisions SET geom = ST_PointFromText('POINT(' || longitude || ' ' || latitude ||')', 4326);"
 	touch $@
 
+
+nypp_13c_av/nypp.shp:
+	wget -O nypp_13c_av.zip --no-check-certificate https://data.ny.gov/api/assets/A8BB7FF2-BDCD-417B-B183-01F8AB10FF89?download=true
+	unzip nypp_13c_av.zip
+	rm nypp_13c_av.zip
+	touch nypp_13c_av
+
+
+tables/nypp2263: nypp_13c_av/nypp.shp | tables
+	psql -d ${DBNAME} -c "DROP TABLE IF EXISTS nypp2263"
+	shp2pgsql -s 2263 nypp_13c_av/nypp.shp nypp2263 -g the_geom | psql -d ${DBNAME}
+	touch $@ 
+
+tables/nypp: tables/nypp2263
+	psql -d ${DBNAME} -c "DROP TABLE IF EXISTS nypp"
+	psql -d ${DBNAME} -c "CREATE TABLE nypp AS SELECT *, ST_SetSRID(ST_Transform(geom, 4326), 4326) as the_geom from nypp2263;"
+	psql -d ${DBNAME} -c "ALTER TABLE nypp DROP COLUMN geom;"
+	psql -d ${DBNAME} -c "ALTER TABLE nypp RENAME COLUMN the_geom TO geom;"
+	touch $@
+
 analysis: table/collisions
 	echo psql -d ${DBNAME} -c "$${ANALYSISQUERY}"
 
+
+tables/per_precinct_collisions: tables/nypp tables/collisions
+	psql -d ${DBNAME} -c "DROP TABLE IF EXISTS per_precinct_collisions"
+	psql -d ${DBNAME} -c "$$PERPRECINCTQUERY"
+	touch tables/per_precinct_collisions
 
 collision_change_yoy.csv: tables/collisions
 	psql -d ${DBNAME} -c "$$YOYCHANGEQUERYFORCHART"
@@ -105,6 +130,16 @@ define YOYCHANGEQUERYFORCHART
 endef
 export YOYCHANGEQUERYFORCHART
 
-define ASDF
-
+define PERPRECINCTQUERY
+	CREATE TABLE per_precinct_collisions AS
+	SELECT nypp.Precinct, 
+		sum(NUMBER_OF_PERSONS_INJURED) AS injured, sum(NUMBER_OF_PERSONS_KILLED) AS killed, 
+		sum(CASE WHEN NUMBER_OF_PERSONS_INJURED = 0 and NUMBER_OF_PERSONS_INJURED = 0 THEN 1 ELSE 0 END) AS minor,
+		sum(CASE WHEN NUMBER_OF_PERSONS_INJURED > 0 or NUMBER_OF_PERSONS_INJURED > 0 THEN 1 ELSE 0 END) AS serious,
+		count(*) AS total_incidents
+	FROM collisions
+	JOIN nypp ON ST_Contains(nypp.geom, collisions.geom)
+	WHERE collisions.datetime > '2014-12-22' AND collisions.datetime < '2015-01-09'
+	GROUP BY nypp.Precinct
 endef
+export PERPRECINCTQUERY
