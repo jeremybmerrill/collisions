@@ -1,5 +1,7 @@
 DBNAME = "collisions"
 
+all: collision_change_yoy.csv
+
 NYPD_Motor_Vehicle_Collisions.csv: 
 	wget -O $@ https://data.cityofnewyork.us/api/views/h9gi-nx95/rows.csv?accessType=DOWNLOAD
 
@@ -8,13 +10,9 @@ collisions.csv: NYPD_Motor_Vehicle_Collisions.csv
 	tail -n +2 $< >> $@
 
 tables: 
-	mkdir tables
-
-intermediate/loldbtables: | intermediate
 	-createdb ${DBNAME} #- means don't abort on error
-	-psql -d ${DBNAME} -c "CREATE EXTENSION postgis"
-	mkdir intermediate/loldbtables
-
+	-psql -d ${DBNAME} -c "CREATE EXTENSION postgis;"
+	mkdir tables
 
 tables/collisions: collisions.csv | tables
 	cat createtable.sql | psql -d ${DBNAME}
